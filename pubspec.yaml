@@ -35,6 +35,12 @@ dependencies:
   cached_network_image: ^3.2.0
   shared_preferences: ^2.0.6
   animate_do: ^3.0.2
+  image_picker: ^0.8.4+4
+  contacts_service: ^0.6.3
+  geolocator: ^7.6.2
+  permission_handler: ^10.2.0
+  battery_plus: ^4.1.0
+  flutter_local_notifications: ^16.3.0
   
 
   # The following adds the Cupertino Icons font to your application.

@@ -1,4 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:image_picker/image_picker.dart';
+import 'dart:io';
+import 'package:geolocator/geolocator.dart';
+import 'package:battery_plus/battery_plus.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 class Profile extends StatefulWidget {
   static const String id = 'Profile';
@@ -8,258 +14,224 @@ class Profile extends StatefulWidget {
 }
 
 class _ProfileState extends State<Profile> {
-  final _formKey = GlobalKey<FormState>();
-  String name = 'John Doe';
-  String email = 'johndoe@email.com';
-  String cardNumber = '**** **** **** 1234';
-  String expiryDate = '12/24';
-  String cvv = '***';
-  String address = '123 Fashion Street, New York, NY';
-  String phone = '+1 123 456 7890';
-
-  bool _isEditing = false;
-
-  final TextEditingController _nameController = TextEditingController();
-  final TextEditingController _emailController = TextEditingController();
-  final TextEditingController _cardController = TextEditingController();
-  final TextEditingController _expiryController = TextEditingController();
-  final TextEditingController _cvvController = TextEditingController();
-  final TextEditingController _addressController = TextEditingController();
-  final TextEditingController _phoneController = TextEditingController();
+  String name = 'Jane Doe';
+  String email = 'janedoe@fashionstore.com';
+  String address = '456 Fashion Avenue, Los Angeles, CA';
+  String phone = '+1 987 654 3210';
+  String membership = 'Premium';
+  String accountCreated = '2023-01-15';
+  File? _profileImage;
+  Position? _currentPosition;
+  int _batteryLevel = 0;
+  BatteryState _batteryState = BatteryState.unknown;
+  final Battery _battery = Battery();
+  final FlutterLocalNotificationsPlugin _notificationsPlugin = FlutterLocalNotificationsPlugin();
 
   @override
   void initState() {
     super.initState();
-    _nameController.text = name;
-    _emailController.text = email;
-    _cardController.text = cardNumber;
-    _expiryController.text = expiryDate;
-    _cvvController.text = cvv;
-    _addressController.text = address;
-    _phoneController.text = phone;
+    _loadUserProfile();
+    _getCurrentLocation();
+    _getBatteryLevel();
+    _initNotifications();
+
+    _battery.onBatteryStateChanged.listen((BatteryState state) {
+      setState(() {
+        _batteryState = state;
+      });
+    });
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
-    final screenSize = MediaQuery.of(context).size;
-    final isLandscape = screenSize.width > screenSize.height;
+  Future<void> _loadUserProfile() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    setState(() {
+      name = prefs.getString('user_name') ?? name;
+      email = prefs.getString('user_email') ?? email;
+      phone = prefs.getString('user_phone') ?? phone;
+      address = prefs.getString('user_address') ?? address;
+      String? profileImagePath = prefs.getString('profile_image');
+      if (profileImagePath != null) {
+        _profileImage = File(profileImagePath);
+      }
+    });
+  }
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('My Profile'),
-        backgroundColor: isDarkMode ? Colors.black : Colors.orange,
+  Future<void> _pickImage(ImageSource source) async {
+    final picker = ImagePicker();
+    final pickedFile = await picker.pickImage(source: source);
+
+    if (pickedFile != null) {
+      setState(() {
+        _profileImage = File(pickedFile.path);
+      });
+
+      SharedPreferences prefs = await SharedPreferences.getInstance();
+      await prefs.setString('profile_image', pickedFile.path);
+    }
+  }
+
+  Future<void> _getCurrentLocation() async {
+    Position position = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
+    setState(() {
+      _currentPosition = position;
+    });
+  }
+
+  Future<void> _getBatteryLevel() async {
+    int batteryLevel = await _battery.batteryLevel;
+    setState(() {
+      _batteryLevel = batteryLevel;
+    });
+  }
+
+  Future<void> _initNotifications() async {
+    const AndroidInitializationSettings initializationSettingsAndroid =
+        AndroidInitializationSettings('@mipmap/ic_launcher');
+
+    final InitializationSettings initializationSettings =
+        InitializationSettings(android: initializationSettingsAndroid);
+
+    await _notificationsPlugin.initialize(initializationSettings);
+  }
+
+  Future<void> _showNotification(String message) async {
+    const AndroidNotificationDetails androidPlatformChannelSpecifics =
+        AndroidNotificationDetails('channel_id', 'General Notifications',
+            importance: Importance.high, priority: Priority.high);
+
+    const NotificationDetails platformChannelSpecifics =
+        NotificationDetails(android: androidPlatformChannelSpecifics);
+
+    await _notificationsPlugin.show(0, 'Profile Update', message, platformChannelSpecifics);
+  }
+
+  void _editField(String field, String value, Function(String) onSave) {
+    TextEditingController controller = TextEditingController(text: value);
+    
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Edit $field'),
+        content: TextField(
+          controller: controller,
+          decoration: InputDecoration(border: OutlineInputBorder()),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: Text('Cancel')),
+          TextButton(
+            onPressed: () async {
+              onSave(controller.text);
+              SharedPreferences prefs = await SharedPreferences.getInstance();
+              await prefs.setString('user_${field.toLowerCase()}', controller.text);
+              _showNotification('$field updated successfully!');
+              Navigator.pop(context);
+            },
+            child: Text('Save'),
+          ),
+        ],
       ),
-      backgroundColor: isDarkMode ? Colors.black : Colors.white,
-      body: SingleChildScrollView(
-        child: Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Profile section
-              _buildProfileHeader(isDarkMode, isLandscape),
+    );
+  }
 
-              const SizedBox(height: 30),
-
-              // Payment details, address, and phone
-              _buildInformationSection(isDarkMode),
-
-              const SizedBox(height: 30),
-
-              // Action buttons (Edit Profile, Log Out)
-              _buildActionButtons(isDarkMode),
-
-              const SizedBox(height: 30),
-
-              // Settings and Preferences
-              const Text(
-                'Settings & Preferences:',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 10),
-              _buildSettings(isDarkMode),
-
-              const SizedBox(height: 20),
-            ],
-          ),
-        ),
+  Widget _buildProfileDetail(String title, String value, Function()? onEdit, bool isDarkMode) {
+    return Card(
+      color: isDarkMode ? Colors.grey[900] : Colors.orange.shade100,
+      margin: EdgeInsets.symmetric(vertical: 8),
+      child: ListTile(
+        title: Text(title, style: TextStyle(fontWeight: FontWeight.bold, color: isDarkMode ? Colors.white : Colors.black)),
+        subtitle: Text(value, style: TextStyle(color: isDarkMode ? Colors.white70 : Colors.black87)),
+        trailing: onEdit != null ? IconButton(icon: Icon(Icons.edit, color: isDarkMode ? Colors.orange : Colors.black), onPressed: onEdit) : null,
       ),
     );
   }
 
-  // Profile Header Widget
-  Widget _buildProfileHeader(bool isDarkMode, bool isLandscape) {
-    return isLandscape
-        ? Row(
-      children: [
-        _buildProfileImage(),
-        const SizedBox(width: 20),
-        Expanded(child: _buildProfileInfo(isDarkMode)),
-      ],
-    )
-        : Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _buildProfileImage(),
-        const SizedBox(height: 20),
-        _buildProfileInfo(isDarkMode),
-      ],
-    );
-  }
+  Widget _buildBatteryStatus(bool isDarkMode) {
+    Color batteryColor = Colors.green;
+    IconData batteryIcon = Icons.battery_full;
 
-  // Profile Image Widget
-  Widget _buildProfileImage() {
-    return const CircleAvatar(
-      radius: 60,
-      backgroundImage: AssetImage('assets/images/profile_pic.jpg'),
-    );
-  }
+    if (_batteryLevel <= 20) {
+      batteryColor = Colors.red;
+      batteryIcon = Icons.battery_alert;
+    } else if (_batteryLevel <= 50) {
+      batteryColor = Colors.orange;
+      batteryIcon = Icons.battery_4_bar;
+    }
 
-  // Profile Information (Name, Email) Widget
-  Widget _buildProfileInfo(bool isDarkMode) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          name,
-          style: TextStyle(
-            fontSize: 28,
-            fontWeight: FontWeight.bold,
-            color: isDarkMode ? Colors.white : Colors.orange,
-          ),
-        ),
-        const SizedBox(height: 5),
-        Text(
-          email,
-          style: TextStyle(
-            fontSize: 18,
-            color: isDarkMode ? Colors.white70 : Colors.black54,
-          ),
-        ),
-      ],
-    );
-  }
+    String batteryStatus = 'Unknown';
+    switch (_batteryState) {
+      case BatteryState.charging:
+        batteryStatus = 'Charging';
+        break;
+      case BatteryState.discharging:
+        batteryStatus = 'Not Charging';
+        break;
+      case BatteryState.full:
+        batteryStatus = 'Full';
+        break;
+      default:
+        batteryStatus = 'Unknown';
+    }
 
-  // Information Section (Payment Details, Address, Phone)
-  Widget _buildInformationSection(bool isDarkMode) {
-    return _isEditing
-        ? _buildEditableForm(isDarkMode)
-        : Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          'Payment Details:',
-          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-        ),
-        const SizedBox(height: 5),
-        Text(
-          'Card Number: $cardNumber\nExpiry Date: $expiryDate\nCVV: $cvv',
-          style: TextStyle(
-            fontSize: 16,
-            color: isDarkMode ? Colors.white70 : Colors.black,
+    return Container(
+      margin: EdgeInsets.all(16),
+      padding: EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: isDarkMode ? Colors.grey[850] : Colors.white,
+        borderRadius: BorderRadius.circular(15),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.1),
+            blurRadius: 10,
+            offset: Offset(0, 5),
           ),
-        ),
-        const SizedBox(height: 20),
-        const Text(
-          'Address:',
-          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-        ),
-        const SizedBox(height: 5),
-        Text(
-          address,
-          style: TextStyle(
-            fontSize: 16,
-            color: isDarkMode ? Colors.white70 : Colors.black,
-          ),
-        ),
-        const SizedBox(height: 20),
-        const Text(
-          'Phone:',
-          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-        ),
-        const SizedBox(height: 5),
-        Text(
-          phone,
-          style: TextStyle(
-            fontSize: 16,
-            color: isDarkMode ? Colors.white70 : Colors.black,
-          ),
-        ),
-      ],
-    );
-  }
-
-  // Editable Form Widget
-  Widget _buildEditableForm(bool isDarkMode) {
-    return Form(
-      key: _formKey,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        ],
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          _buildTextField(
-            controller: _nameController,
-            label: 'Name',
-            isDarkMode: isDarkMode,
-          ),
-          _buildTextField(
-            controller: _emailController,
-            label: 'Email',
-            isDarkMode: isDarkMode,
-          ),
-          _buildTextField(
-            controller: _cardController,
-            label: 'Card Number',
-            isDarkMode: isDarkMode,
-          ),
           Row(
             children: [
-              Expanded(
-                child: _buildTextField(
-                  controller: _expiryController,
-                  label: 'Expiry Date',
-                  isDarkMode: isDarkMode,
-                ),
+              Icon(
+                batteryIcon,
+                color: batteryColor,
+                size: 24,
               ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _buildTextField(
-                  controller: _cvvController,
-                  label: 'CVV',
-                  isDarkMode: isDarkMode,
-                ),
+              SizedBox(width: 12),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Battery Status',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: isDarkMode ? Colors.white : Colors.black,
+                    ),
+                  ),
+                  Text(
+                    batteryStatus,
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: isDarkMode ? Colors.grey[400] : Colors.grey[600],
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
-          _buildTextField(
-            controller: _addressController,
-            label: 'Address',
-            isDarkMode: isDarkMode,
-          ),
-          _buildTextField(
-            controller: _phoneController,
-            label: 'Phone',
-            isDarkMode: isDarkMode,
-          ),
-          const SizedBox(height: 30),
           Container(
-            width: double.infinity,
-            child: ElevatedButton(
-              onPressed: () {
-                if (_formKey.currentState!.validate()) {
-                  setState(() {
-                    name = _nameController.text;
-                    email = _emailController.text;
-                    cardNumber = _cardController.text;
-                    expiryDate = _expiryController.text;
-                    cvv = _cvvController.text;
-                    address = _addressController.text;
-                    phone = _phoneController.text;
-                    _isEditing = false;
-                  });
-                }
-              },
-              child: const Text('Save'),
+            padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              color: batteryColor.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Text(
+              '$_batteryLevel%',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                color: batteryColor,
+              ),
             ),
           ),
         ],
@@ -267,138 +239,46 @@ class _ProfileState extends State<Profile> {
     );
   }
 
-  // Settings Widget
-  Widget _buildSettings(bool isDarkMode) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        SwitchListTile(
-          value: true,
-          onChanged: (value) {},
-          title: Text(
-            'Enable Notifications',
-            style: TextStyle(
-              color: isDarkMode ? Colors.white70 : Colors.black,
-            ),
-          ),
-        ),
-        SwitchListTile(
-          value: false,
-          onChanged: (value) {},
-          title: Text(
-            'Receive Promotional Emails',
-            style: TextStyle(
-              color: isDarkMode ? Colors.white70 : Colors.black,
-            ),
-          ),
-        ),
-      ],
-    );
-  }
+  @override
+  Widget build(BuildContext context) {
+    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
 
-  // Action Buttons (Edit Profile, Log Out)
-  Widget _buildActionButtons(bool isDarkMode) {
-    return Column(
-      children: [
-        Container(
-          width: double.infinity,
-          decoration: BoxDecoration(
-            gradient: isDarkMode
-                ? const LinearGradient(
-                colors: [Colors.orange, Colors.deepOrange])
-                : const LinearGradient(
-                colors: [Colors.orangeAccent, Colors.yellow]),
-            borderRadius: BorderRadius.circular(30),
-          ),
-          child: ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              padding: const EdgeInsets.symmetric(vertical: 15),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(30),
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('My Profile'),
+        backgroundColor: isDarkMode ? Colors.black : Colors.orange,
+      ),
+      backgroundColor: isDarkMode ? Colors.black : Colors.white,
+      body: SingleChildScrollView(
+        padding: EdgeInsets.all(16),
+        child: Column(
+          children: [
+            GestureDetector(
+              onTap: () => _pickImage(ImageSource.gallery),
+              child: CircleAvatar(
+                radius: 60,
+                backgroundColor: isDarkMode ? Colors.grey[800] : Colors.orange.shade100,
+                backgroundImage: _profileImage != null
+                    ? FileImage(_profileImage!)
+                    : AssetImage('assets/images/profile_pic.jpg') as ImageProvider,
+                child: _profileImage == null ? Icon(Icons.camera_alt, size: 40, color: isDarkMode ? Colors.white : Colors.black) : null,
               ),
-              elevation: 5,
-              backgroundColor: Colors.transparent,
             ),
-            onPressed: () {
-              setState(() {
-                _isEditing = !_isEditing;
-              });
-            },
-            child: Text(
-              _isEditing ? 'Cancel Editing' : 'Edit Profile',
-              style: const TextStyle(fontSize: 18, color: Colors.white),
-            ),
-          ),
+            SizedBox(height: 20),
+            _buildProfileDetail('Name', name, () => _editField('Name', name, (val) => setState(() => name = val)), isDarkMode),
+            _buildProfileDetail('Email', email, () => _editField('Email', email, (val) => setState(() => email = val)), isDarkMode),
+            _buildProfileDetail('Phone', phone, () => _editField('Phone', phone, (val) => setState(() => phone = val)), isDarkMode),
+            _buildProfileDetail('Address', address, () => _editField('Address', address, (val) => setState(() => address = val)), isDarkMode),
+            _buildProfileDetail('Membership', membership, null, isDarkMode),
+            _buildProfileDetail('Account Created', accountCreated, null, isDarkMode),
+            SizedBox(height: 20),
+            _buildBatteryStatus(isDarkMode),
+            if (_currentPosition != null)
+              Text('Location: ${_currentPosition!.latitude}, ${_currentPosition!.longitude}', style: TextStyle(fontSize: 16, color: isDarkMode ? Colors.white70 : Colors.black54)),
+          ],
         ),
-        const SizedBox(height: 10),
-        Container(
-          width: double.infinity,
-          decoration: BoxDecoration(
-            gradient: isDarkMode
-                ? const LinearGradient(
-                colors: [Colors.red, Colors.deepOrangeAccent])
-                : const LinearGradient(
-                colors: [Colors.redAccent, Colors.pinkAccent]),
-            borderRadius: BorderRadius.circular(30),
-          ),
-          child: ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              padding: const EdgeInsets.symmetric(vertical: 15),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(30),
-              ),
-              elevation: 5,
-              backgroundColor: Colors.transparent,
-            ),
-            onPressed: () {
-              Navigator.pushNamed(context, 'login');
-            },
-            child: const Text(
-              'Log Out',
-              style: TextStyle(fontSize: 18, color: Colors.white),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  // Helper method to build text fields
-  Widget _buildTextField({
-    required TextEditingController controller,
-    required String label,
-    required bool isDarkMode,
-  }) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 10),
-      child: TextFormField(
-        controller: controller,
-        decoration: InputDecoration(
-          labelText: label,
-          labelStyle: TextStyle(
-            color: isDarkMode ? Colors.white : Colors.black,
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderSide: BorderSide(
-              color: isDarkMode ? Colors.white70 : Colors.black45,
-            ),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderSide: BorderSide(
-              color: isDarkMode ? Colors.orange : Colors.orangeAccent,
-            ),
-          ),
-        ),
-        style: TextStyle(
-          color: isDarkMode ? Colors.white70 : Colors.black,
-        ),
-        validator: (value) {
-          if (value == null || value.isEmpty) {
-            return 'Please enter $label';
-          }
-          return null;
-        },
       ),
     );
   }
 }
+
